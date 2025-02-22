@@ -278,7 +278,7 @@ class OllamaChatbot:
         return history
     
     def update_progress_bar(self, value):
-        if value:
+        if value is not None:
             return f"""
                 <div class="progress-bar-container">
                     <div class="progress-bar-background"></div>
