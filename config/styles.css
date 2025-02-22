@@ -1,0 +1,64 @@
+/* fixes progress bar dimming because of lost focus */
+.html-container.pending {
+    opacity: 1 !important;
+}
+
+.progress-container {
+    position: relative;
+    background-color: #27272a;
+    border-top: 1px solid #3f3f46;
+    border-bottom: 1px solid #3f3f46;
+    border-right: 1px solid #3f3f46;
+    border-left: none !important;
+    padding: 10px;
+    margin-left: -16px !important;
+}
+
+.progress-display {
+    border: none!important;  
+}
+
+.progress-bar {
+    margin-top: -10px!important;
+    overflow: hidden!important;
+    height: 23px!important;
+}
+
+.progress-bar-container {
+    overflow: hidden;
+    height: 20px;
+}
+
+.progress-bar-background {
+    overflow: hidden;
+    width: 100%;
+    height: 12px;
+    background-color: #3f3f46;
+    border-radius: 5px;
+    position: absolute;
+    top: 0%;
+    z-index: 1;
+}
+
+.progress-bar-foreground {
+    overflow: hidden;
+    height: 12px;
+    background-color: #2196F3!important; 
+    border-radius: 5px;
+    position: absolute;
+    top: 0%;
+    z-index: 2;
+}
+
+.progress-bar-text {
+    overflow: hidden;
+    width: 100%;
+    height: 12px;
+    text-align: center;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    line-height: 12px;
+    color: white;
+    position: absolute;
+    top: 0%;
+    z-index: 3;
+}

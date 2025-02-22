@@ -1,0 +1,9 @@
+ollama
+faiss-cpu
+pypdf
+gradio
+torch --index-url https://download.pytorch.org/whl/cpu
+llama_index
+llama-index-embeddings-huggingface
+llama-index-vector-stores-faiss
+pywebview
