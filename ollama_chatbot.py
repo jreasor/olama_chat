@@ -80,10 +80,14 @@ class OllamaChatbot:
                 else:
                     self.client = ollama.Client(host=f"{default_host}:{default_port}")
             except ollama.RequestError as e:
-                print(f"Error loading ollama: {e}")
+                message = f"Error loading ollama: {e}"
+                print(message, file=sys.stderr)
+                gr.Error(message=message)
                 sys.exit(1)
             except Exception as e:
-                print(f"Error loading ollama: {e}")
+                message = f"Error loading ollama: {e}"
+                print(message, file=sys.stderr)
+                gr.Error(message=message)
                 sys.exit(1)
                 
         if not self.models:
@@ -109,7 +113,9 @@ class OllamaChatbot:
                         content = f.read()
                 
             except FileNotFoundError:    
-                print("Unable to read css file '{self.css_file}'")
+                message = "Unable to read css file '{self.css_file}'"
+                print(message, file=sys.stderr)
+                gr.Error(message=message)
                 
             self.styles = f"<style>\n{content}\n</style>"
         
@@ -189,10 +195,14 @@ class OllamaChatbot:
                 ollama.pull(model)
                 self.models = [model]
         except ollama.RequestError as e:
-            print(f"Error returning available models from Ollama: {e}")
+            message = f"Error returning available models from Ollama: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
             self.models = []
         except Exception as e:
-            print(f"Error returning available models from Ollama: {e}")
+            message = f"Error returning available models from Ollama: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
             self.models = []
             
         if not self.models or self.models == []:
@@ -207,11 +217,11 @@ class OllamaChatbot:
         try:
             os.makedirs(folder, exist_ok=True)
         except PermissionError:
-            print("Permission denied. Unable to create folder '{folder}'.")
-            print("Unable to save chat history for this session.")
+            print("Permission denied. Unable to create folder '{folder}'.", file=sys.stderr)
+            print("Unable to save chat history for this session.", file=sys.stderr)
         except OSError as e:
-            print(f"An error occurred while creating the folder: {e}")
-            print("Unable to save chat history for this session.")
+            print(f"An error occurred while creating the folder: {e}", file=sys.stderr)
+            print("Unable to save chat history for this session.", file=sys.stderr)
             
     def pull_model(self, model):
         ollama.pull(model)
@@ -248,9 +258,9 @@ class OllamaChatbot:
                         else:
                             self.chat_list = [self.ChatList(filename=file, summary=summary, history=chat_history)]
         except FileNotFoundError:
-            print(f"Unable to find chat history file at path: {self.chat_save_folder}")
+            print(f"Unable to find chat history file at path: {self.chat_save_folder}", file=sys.stderr)
         except json.JSONDecodeError:
-            print("Error reading JSON data from chat history file")
+            print("Error reading JSON data from chat history file", file=sys.stderr)
         
     def save_chat_history(self):
         if not self.chat_initiated or self.chat_history== []:
@@ -332,29 +342,35 @@ class OllamaChatbot:
     
     def load_or_create_index(self, folder_path):
         persist_dir = f"{folder_path}_faiss_index"
-        embedding_model = HuggingFaceEmbedding(model_name=self.embedding_model_name)
         
-        if os.path.exists(persist_dir) and os.listdir(persist_dir):
-            vector_store = FaissVectorStore.from_persist_dir(persist_dir)
-            storage_context = StorageContext.from_defaults(
-                vector_store=vector_store, persist_dir=persist_dir
-            )
-            self.index = load_index_from_storage(storage_context=storage_context, embed_model=embedding_model)
-        else:
-            documents = self.load_documents(folder_path)
-            file_list = set(doc.metadata.get("file_name", "Unknown") for doc in documents)
-            num_files = len(file_list)
-            progress = gr.Progress(track_tqdm=True)
-            for i, file in enumerate(progress.tqdm(file_list, desc="Processing Files", total=num_files)):
-                percentage = int(i / num_files * 100)
-                yield f"Processing file {i + 1}/{num_files}: {file}", percentage
-                faiss_index = faiss.IndexFlatL2(self.embedding_dimension)
-                vector_store = FaissVectorStore(faiss_index=faiss_index)
-                storage_context = StorageContext.from_defaults(vector_store=vector_store)
-                self.index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, embed_model=embedding_model)
-                self.index.storage_context.persist(persist_dir=persist_dir)
+        try:
+            embedding_model = HuggingFaceEmbedding(model_name=self.embedding_model_name)
+            
+            if os.path.exists(persist_dir) and os.listdir(persist_dir):
+                vector_store = FaissVectorStore.from_persist_dir(persist_dir)
+                storage_context = StorageContext.from_defaults(
+                    vector_store=vector_store, persist_dir=persist_dir
+                )
+                self.index = load_index_from_storage(storage_context=storage_context, embed_model=embedding_model)
+            else:
+                documents = self.load_documents(folder_path)
+                file_list = set(doc.metadata.get("file_name", "Unknown") for doc in documents)
+                num_files = len(file_list)
+                progress = gr.Progress(track_tqdm=True)
+                for i, file in enumerate(progress.tqdm(file_list, desc="Processing Files", total=num_files)):
+                    percentage = int(i / num_files * 100)
+                    yield f"Processing file {i + 1}/{num_files}: {file}", percentage
+                    faiss_index = faiss.IndexFlatL2(self.embedding_dimension)
+                    vector_store = FaissVectorStore(faiss_index=faiss_index)
+                    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+                    self.index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, embed_model=embedding_model)
+                    self.index.storage_context.persist(persist_dir=persist_dir)
 
-            yield f"FAISS Index created with {num_files} files!", 100
+                yield f"FAISS Index created with {num_files} files!", 100
+        except Exception as e:
+            message = f"Error creating FAISS index: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
 
     def chat_with_ollama(self, message):
         """Sends a message to Ollama and streams the response."""
@@ -432,7 +448,9 @@ class OllamaChatbot:
             self.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
             yield self.chat_history, gr.update(value="")
         except Exception as e:
-            print(f"Error making request to Ollama: {e}")
+            message = f"Error making request to Ollama: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
             sys.exit(1)
             
         if self.ollama_mode == "Search" and len(source_info):
