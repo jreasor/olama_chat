@@ -1,0 +1,15 @@
+host: localhost
+port: 11434
+layout: panel
+default_model: mistral:latest
+documents_path: null
+
+# English only embedding models
+embedded_model: "msmarco-bert-base-dot-v5:768"
+# embedded_model: "jinaai/jina-embeddings-v2-base-en:768"
+# embedded_model: "BAAI/bge-large-en-v1.5:1024"
+# embedded_model: "nomic-ai/nomic-embed-text-v1:768"
+
+# Multilingual embedding models
+# embedded_model: "intfloat/multilingual-e5-base:768"
+# embedded_model: "BAAI/bge-m3:1024"

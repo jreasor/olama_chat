@@ -3,6 +3,7 @@ import signal
 import sys
 import subprocess
 import json
+import yaml
 import time
 import gradio as gr
 import ollama
@@ -20,7 +21,8 @@ class OllamaChatbot:
                  client=None,
                  models=None,
                  model=None,
-                 config_file="config/config.json",
+                 default_config_file="config/default_config.yaml",
+                 config_file="config/config.yaml",
                  config=None,
                  ollama_mode="Chat",
                  chat_initiated=False,
@@ -30,8 +32,6 @@ class OllamaChatbot:
                  chat_list=None,
                  summary="",
                  session_timestamp=None,
-                 embedding_model_name="msmarco-bert-base-dot-v5",
-                 embedding_dimension=768,
                  index=None,
                  doc_path=None,
                  top_doc=3,
@@ -46,6 +46,7 @@ class OllamaChatbot:
         self.client = client
         self.models = models
         self.model = model
+        self.default_config_file = default_config_file
         self.config_file = config_file
         self.config = config
         self.ollama_mode = ollama_mode
@@ -56,8 +57,6 @@ class OllamaChatbot:
         self.chat_list = chat_list
         self.summary = summary
         self.session_timestamp = session_timestamp
-        self.embedding_model_name = embedding_model_name
-        self.embedding_dimension = embedding_dimension
         self.index = index
         self.doc_path = doc_path
         self.top_doc = top_doc
@@ -128,29 +127,95 @@ class OllamaChatbot:
     def signal_handler(self, sig, frame):
         self.save_chat_history()
         sys.exit(0)
+        
+    def read_yaml(self, file_path):
+        """
+        Reads a YAML file and returns its contents as a dictionary.
+        
+        Args:
+            file_path (str): The path to the YAML file.
+            
+        Returns:
+            dict: The parsed YAML content.
+            
+        Raises:
+            FileNotFoundError: If the specified file does not exist.
+            yaml.YAMLError: If there is an error parsing the YAML file.
+        """
+        data = None
+        with open(file_path, 'r') as file:
+            try:
+                data = yaml.safe_load(file)
+            except yaml.YAMLError as exc:
+                raise Exception(f"Error reading YAML file: {exc}") from None
+        return data
+            
+    def write_yaml(self, file_path, data, overwrite=True):
+        """
+        Writes or updates a dictionary to a YAML file.
+        
+        If the file exists and 'overwrite' is False, new key-value pairs will be added,
+        merging with existing data. If 'overwrite' is True (default), the entire content
+        of the file will be replaced with the provided data.
+        
+        Args:
+            file_path (str): The path to the YAML file.
+            data (dict): The dictionary to write into the YAML file.
+            overwrite (bool, optional): Whether to replace existing keys or merge them. Defaults to True.
+            
+        Raises:
+            Exception: If there is an error writing to the file.
+        """
+        
+        write_data = data
+        
+        if os.path.exists(file_path):   
+            with open(file_path, 'r') as file:
+                try:
+                    existing_data = yaml.safe_load(file)
+                except FileNotFoundError:
+                    existing_data = {}
+            
+            if not overwrite:
+               write_data = {**existing_data, **data}
+        
+        with open(file_path, 'w') as file:
+            yaml.safe_dump(write_data, file)
 
     def load_config(self):
         default_host = "localhost"
         default_port = "11434"
         default_layout = "panel"
-        default_json = {"host": default_host, "port": default_port, "layout": default_layout}
+        default_embedding_model = "msmarco-bert-base-dot-v5:768"
+        default_json = {"host": default_host,
+                        "port": default_port,
+                        "layout": default_layout,
+                        "embedding_model": default_embedding_model
+                        }
         
         try:
+            config = None
+            
             if os.path.exists(self.config_file):
-                with open(self.config_file, "r") as f:
-                    content = f.read()
-                    config_json = json.loads(content)
+                config = self.read_yaml(self.config_file)
+                
+            elif os.path.exists(self.default_config_file):
+                config = self.read_yaml(self.default_config_file)
+
+            if config:                    
+                if "host" not in config:
+                    config['host'] = default_host
                     
-                    if "host" not in config_json:
-                        config_json['host'] = default_host
-                        
-                    if "port" not in config_json:
-                        config_json['port'] = default_port
-                        
-                    if "layout" not in config_json:
-                        config_json['layout'] = default_layout
+                if "port" not in config:
+                    config['port'] = default_port
                     
-                    self.config = config_json
+                if "layout" not in config:
+                    config['layout'] = default_layout
+                    
+                if "embedding_model" not in config:
+                    config['embedding_model'] = default_embedding_model
+                
+                self.config = config
             else:
                 self.config = default_json
         except FileNotFoundError:
@@ -168,12 +233,9 @@ class OllamaChatbot:
             else:
                 self.config = {}
                 self.config[property_name] = data
-            
-            with open(self.config_file, "w") as file:
-                json.dump(self.config, file)
                 
-        except json.JSONDecodeError:
-            raise ValueError("Data does not follow proper JSON formatting")
+            self.write_yaml(file_path=self.config_file, data=self.config)
+
         except Exception as e:
             raise ValueError(f"Error saving configuration: {e}")
 
@@ -340,11 +402,27 @@ class OllamaChatbot:
             documents = []
         return documents
     
+    def get_embedding_model(self):
+        try:
+            if self.config and "embedding_model" in self.config:
+                model, dimension = self.config['embedding_model'].split(':')
+                embedding_model = HuggingFaceEmbedding(model_name=model)
+                
+                return embedding_model, int(dimension)
+        except Exception as e:
+            message = f"Error loading embedding model: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
+            return None, None
+    
     def load_or_create_index(self, folder_path):
         persist_dir = f"{folder_path}_faiss_index"
         
         try:
-            embedding_model = HuggingFaceEmbedding(model_name=self.embedding_model_name)
+            embedding_model, dimension = self.get_embedding_model()
+            
+            if not embedding_model or not dimension:
+                raise "Unabled to load embedding model"
             
             if os.path.exists(persist_dir) and os.listdir(persist_dir):
                 vector_store = FaissVectorStore.from_persist_dir(persist_dir)
@@ -360,7 +438,7 @@ class OllamaChatbot:
                 for i, file in enumerate(progress.tqdm(file_list, desc="Processing Files", total=num_files)):
                     percentage = int(i / num_files * 100)
                     yield f"Processing file {i + 1}/{num_files}: {file}", percentage
-                    faiss_index = faiss.IndexFlatL2(self.embedding_dimension)
+                    faiss_index = faiss.IndexFlatL2(dimension)
                     vector_store = FaissVectorStore(faiss_index=faiss_index)
                     storage_context = StorageContext.from_defaults(vector_store=vector_store)
                     self.index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, embed_model=embedding_model)
@@ -504,7 +582,7 @@ class OllamaChatbot:
                         mode_dropdown.change(fn=self.update_mode, inputs=[mode_dropdown], outputs=[mode_dropdown, folder_display, progress_container])
                         folder_display.submit(fn=self.select_folder, inputs=[], outputs=[folder_display, progress_display, progress_bar], show_progress='hidden')
                         
-                    chatbot = gr.Chatbot(type="messages", height=920, value=self.chat_history, layout=self.layout, sanitize_html=False, autoscroll=True)
+                    chatbot = gr.Chatbot(type="messages", height=800, value=self.chat_history, layout=self.layout, sanitize_html=False, autoscroll=True)
                     chatbot.change(fn=self.detect_clear, inputs=[chatbot], outputs=[])
                     input_textbox = gr.Textbox(label="Chat with Ollama", interactive=True)
                     input_textbox.submit(self.chat_with_ollama, [input_textbox], [chatbot, input_textbox])
