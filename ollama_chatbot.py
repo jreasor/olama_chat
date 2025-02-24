@@ -582,7 +582,7 @@ class OllamaChatbot:
                         mode_dropdown.change(fn=self.update_mode, inputs=[mode_dropdown], outputs=[mode_dropdown, folder_display, progress_container])
                         folder_display.submit(fn=self.select_folder, inputs=[], outputs=[folder_display, progress_display, progress_bar], show_progress='hidden')
                         
-                    chatbot = gr.Chatbot(type="messages", height=800, value=self.chat_history, layout=self.layout, sanitize_html=False, autoscroll=True)
+                    chatbot = gr.Chatbot(type="messages", min_height=600, value=self.chat_history, layout=self.layout, sanitize_html=False, autoscroll=True)
                     chatbot.change(fn=self.detect_clear, inputs=[chatbot], outputs=[])
                     input_textbox = gr.Textbox(label="Chat with Ollama", interactive=True)
                     input_textbox.submit(self.chat_with_ollama, [input_textbox], [chatbot, input_textbox])

@@ -4,6 +4,11 @@ layout: panel
 default_model: mistral:latest
 documents_path: null
 
+# Optional models for embedding faiss index
+# Format is <model>:<dimension>
+# NOTE: If you change this after creating an index
+#       you will need to re-embed
+
 # English only embedding models
 embedding_model: msmarco-bert-base-dot-v5:768
 # embedding_model: jinaai/jina-embeddings-v2-base-en:768
