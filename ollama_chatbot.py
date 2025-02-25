@@ -5,10 +5,12 @@ import subprocess
 import json
 import yaml
 import time
+import gc
+import tempfile
 import gradio as gr
 import ollama
 import faiss
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings, StorageContext, load_index_from_storage
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.faiss import FaissVectorStore
 
@@ -35,6 +37,7 @@ class OllamaChatbot:
                  index=None,
                  doc_path=None,
                  top_doc=3,
+                 filetypes=[".pdf", ".doc", ".docx", ".txt"],
                  retrieved_docs=None,
                  layout=None,
                  css_file="config/styles.css",
@@ -60,6 +63,7 @@ class OllamaChatbot:
         self.index = index
         self.doc_path = doc_path
         self.top_doc = top_doc
+        self.filetypes = filetypes
         self.retrieved_docs = retrieved_docs
         self.layout = layout
         self.css_file = css_file
@@ -358,6 +362,46 @@ class OllamaChatbot:
                     <div class="progress-bar-text">{value}%</div>
                 </div>
             """
+            
+    def save_metadata(self, folder_path, metadata):
+        """Save file metadata to JSON."""
+        metadata_path = os.path.join(folder_path, "index_metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=4)
+
+
+    def load_metadata(self, folder_path):
+        """Load file metadata from JSON (if exists)."""
+        metadata_path = os.path.join(folder_path, "index_metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r") as f:
+                return json.load(f)
+        return {}
+
+
+    def get_current_metadata(self, folder_path):
+        """Get current file metadata (name, modified time, size)."""
+        metadata = {}
+        for dirpath, _, filenames in os.walk(folder_path):
+            for filename in filenames:
+                if any(filename.endswith(ext) for ext in self.filetypes):
+                    file_path = os.path.join(dirpath, filename)
+                    if os.path.isfile(file_path):
+                        metadata[filename] = {
+                            "modified_time": os.path.getmtime(file_path),
+                            "size": os.path.getsize(file_path),
+                        }
+        return metadata
+
+
+    def has_folder_changed(self, folder_path):
+        """Check if files in folder are new or modified."""
+        stored_metadata = self.load_metadata(folder_path)
+        current_metadata = self.get_current_metadata(folder_path)
+        
+        if stored_metadata != current_metadata:
+            return True
+        return False
     
     def select_folder(self):
         """Opens Finder's folder picker using AppleScript and returns the selected path."""
@@ -375,31 +419,50 @@ class OllamaChatbot:
             return
         self.save_config(property_name='documents_path', data=self.doc_path)
         
-        yield self.doc_path, gr.update(value="Loading documents..."), gr.update(value=self.update_progress_bar(0))
-
         for update, percent in self.load_or_create_index(self.doc_path):
             yield self.doc_path, gr.update(value=update), gr.update(value=self.update_progress_bar(percent))
 
         yield self.doc_path, gr.update(value="FAISS Index successfully loaded!"), gr.update(value=self.update_progress_bar(100))
         
-    def load_documents(self, folder_path):
+    def save_documents_to_temp(self, documents):
+        """Save documents to a temporary JSONL (one doc per line) file."""
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jsonl")
+        temp_path = temp_file.name
+        print('temp_path: ', temp_path)
+        with open(temp_path, "w") as f:
+            for doc in documents:
+                f.write(json.dumps(doc.to_dict()) + "\n")  # One doc per line
+        return temp_path
+
+
+    def load_documents(self, path):
         """
         Load documents from the specified folder path.
 
         :param folder_path: The path to the folder containing data.
         :return: A list of loaded documents.
         """
+        documents = None
+        
         try:
-            if os.path.exists(folder_path) and os.listdir(folder_path):
+            if os.path.exists(path) and os.path.isdir(path) and os.listdir(path):
                 file_metadata = lambda x: {"filename": x}
-                documents = SimpleDirectoryReader(folder_path, file_metadata=file_metadata,
+                documents = SimpleDirectoryReader(path, file_metadata=file_metadata,
                                                   recursive=True,
                                                   raise_on_error=True,
-                                                  required_exts=[".pdf", ".doc", ".docx", ".txt", ".xml"]).load_data()
-            else:
-                documents = []
+                                                  required_exts=self.filetypes).load_data()
+            elif os.path.exists(path) and os.path.isfile(path):
+                file_metadata = lambda x: {"filename": x}
+                documents = SimpleDirectoryReader(input_files=[path], 
+                                                  file_metadata=file_metadata,
+                                                  recursive=False,
+                                                  raise_on_error=True,
+                                                  required_exts=self.filetypes).load_data()
         except Exception as e:
-            documents = []
+            message = f"Error loading documents with SimpleDirectoryReader: {e}"
+            print(message, file=sys.stderr)
+            gr.Error(message=message)
+            
         return documents
     
     def get_embedding_model(self):
@@ -414,6 +477,16 @@ class OllamaChatbot:
             print(message, file=sys.stderr)
             gr.Error(message=message)
             return None, None
+        
+    def get_file_list(self, folder_path, filetypes=["*"]):
+        matching_files = []
+        
+        for dirpath, _, filenames in os.walk(folder_path):
+            for filename in filenames:
+                if any(filename.endswith(ext) for ext in filetypes):
+                    matching_files.append(os.path.join(dirpath, filename))
+                    
+        return matching_files
     
     def load_or_create_index(self, folder_path):
         persist_dir = f"{folder_path}_faiss_index"
@@ -424,31 +497,55 @@ class OllamaChatbot:
             if not embedding_model or not dimension:
                 raise "Unabled to load embedding model"
             
-            if os.path.exists(persist_dir) and os.listdir(persist_dir):
+            if os.path.exists(persist_dir) and os.listdir(persist_dir) and not self.has_folder_changed(folder_path):
                 vector_store = FaissVectorStore.from_persist_dir(persist_dir)
                 storage_context = StorageContext.from_defaults(
                     vector_store=vector_store, persist_dir=persist_dir
                 )
                 self.index = load_index_from_storage(storage_context=storage_context, embed_model=embedding_model)
+                return "No changes detected, loading existing FAISS index", None
             else:
-                documents = self.load_documents(folder_path)
-                file_list = set(doc.metadata.get("file_name", "Unknown") for doc in documents)
+                # Save document metadata separately so we can check for updates later
+                file_metadata = self.get_current_metadata(folder_path)
+                self.save_metadata(folder_path, file_metadata)
+                
+                file_list = self.get_file_list(folder_path=folder_path, filetypes=self.filetypes)
                 num_files = len(file_list)
+                
+                faiss_index = faiss.IndexFlatL2(dimension)
+                vector_store = FaissVectorStore(faiss_index=faiss_index)
+                storage_context=StorageContext.from_defaults(vector_store=vector_store)
+                
                 progress = gr.Progress(track_tqdm=True)
                 for i, file in enumerate(progress.tqdm(file_list, desc="Processing Files", total=num_files)):
                     percentage = int(i / num_files * 100)
-                    yield f"Processing file {i + 1}/{num_files}: {file}", percentage
-                    faiss_index = faiss.IndexFlatL2(dimension)
-                    vector_store = FaissVectorStore(faiss_index=faiss_index)
-                    storage_context = StorageContext.from_defaults(vector_store=vector_store)
-                    self.index = VectorStoreIndex.from_documents(documents, storage_context=storage_context, embed_model=embedding_model)
-                    self.index.storage_context.persist(persist_dir=persist_dir)
+                    filename = os.path.basename(file)
+                    yield f"Processing file {i + 1}/{num_files}: {filename}", percentage
+
+                    doc = self.load_documents(path=file)
+
+                    if self.index:
+                        for d in doc:
+                            self.index.insert(d)
+                    else:
+                        self.index = VectorStoreIndex.from_documents(
+                            doc,
+                            storage_context=storage_context,
+                            embed_model=embedding_model
+                        )
+                    
+                    # Clear memory before next document
+                    del doc
+                    gc.collect()
+
+                self.index.storage_context.persist(persist_dir=persist_dir)
 
                 yield f"FAISS Index created with {num_files} files!", 100
         except Exception as e:
             message = f"Error creating FAISS index: {e}"
             print(message, file=sys.stderr)
             gr.Error(message=message)
+            return "Error creating FAISS index", None
 
     def chat_with_ollama(self, message):
         """Sends a message to Ollama and streams the response."""
