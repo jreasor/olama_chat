@@ -85,12 +85,12 @@ class OllamaChatbot:
             except ollama.RequestError as e:
                 message = f"Error loading ollama: {e}"
                 print(message, file=sys.stderr)
-                gr.Error(message=message)
+                gr.Info(title="Error", message=message)
                 sys.exit(1)
             except Exception as e:
                 message = f"Error loading ollama: {e}"
                 print(message, file=sys.stderr)
-                gr.Error(message=message)
+                gr.Info(title="Error", message=message)
                 sys.exit(1)
                 
         if not self.models:
@@ -118,7 +118,7 @@ class OllamaChatbot:
             except FileNotFoundError:    
                 message = "Unable to read css file '{self.css_file}'"
                 print(message, file=sys.stderr)
-                gr.Error(message=message)
+                gr.Info(title="Error", message=message)
                 
             self.styles = f"<style>\n{content}\n</style>"
         
@@ -263,12 +263,12 @@ class OllamaChatbot:
         except ollama.RequestError as e:
             message = f"Error returning available models from Ollama: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             self.models = []
         except Exception as e:
             message = f"Error returning available models from Ollama: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             self.models = []
             
         if not self.models or self.models == []:
@@ -461,7 +461,7 @@ class OllamaChatbot:
         except Exception as e:
             message = f"Error loading documents with SimpleDirectoryReader: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             
         return documents
     
@@ -475,7 +475,7 @@ class OllamaChatbot:
         except Exception as e:
             message = f"Error loading embedding model: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             return None, None
         
     def get_file_list(self, folder_path, filetypes=["*"]):
@@ -544,7 +544,7 @@ class OllamaChatbot:
         except Exception as e:
             message = f"Error creating FAISS index: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             return "Error creating FAISS index", None
 
     def chat_with_ollama(self, message):
@@ -620,12 +620,15 @@ class OllamaChatbot:
             else:
                 raise Exception("Ollama client not loaded")
         except ollama.RequestError as e:
+            message = f"Error making request to Ollama: {e}"
+            print(message, file=sys.stderr)
+            gr.Info(title="Error", message=message)
             self.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
             yield self.chat_history, gr.update(value="")
         except Exception as e:
             message = f"Error making request to Ollama: {e}"
             print(message, file=sys.stderr)
-            gr.Error(message=message)
+            gr.Info(title="Error", message=message)
             sys.exit(1)
             
         if self.ollama_mode == "Search" and len(source_info):
